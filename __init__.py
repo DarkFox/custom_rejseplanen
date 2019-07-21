@@ -1,0 +1,1 @@
+"""The custom rejseplanen component."""
