@@ -42,6 +42,10 @@ ICON = 'mdi:bus'
 
 SCAN_INTERVAL = timedelta(minutes=1)
 
+BUS_TYPES = ['BUS', 'EXB', 'TB']
+TRAIN_TYPES = ['LET', 'S', 'REG', 'IC', 'LYN', 'TOG']
+METRO_TYPES = ['M']
+
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_STOP_ID): cv.string,
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
@@ -51,12 +55,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
         vol.All(cv.ensure_list, [cv.string]),
     vol.Optional(CONF_DEPARTURE_TYPE, default=[]):
         vol.All(cv.ensure_list,
-                [vol.In(list(['BUS', 'EXB', 'TB', 'LET', 'M', 'S', 'REG', 'IC', 'LYN', 'TOG']))])
+                [vol.In([*BUS_TYPES, *TRAIN_TYPES, *METRO_TYPES])])
 })
-
-BUS_TYPES = ['BUS', 'EXB', 'TB']
-TRAIN_TYPES = ['LET', 'S', 'REG', 'IC', 'LYN', 'TOG']
-METRO_TYPES = ['M']
 
 
 def due_in_minutes(timestamp):
@@ -108,22 +108,35 @@ class RejseplanenTransportSensor(Entity):
     @property
     def device_state_attributes(self):
         """Return the state attributes."""
-        if self._times is not None:
-            next_up = None
-            if len(self._times) > 1:
-                next_up = self._times[1:]
-            params = {
-                ATTR_DUE_IN: str(self._times[0][ATTR_DUE_IN]),
-                ATTR_DUE_AT: self._times[0][ATTR_DUE_AT],
-                ATTR_TYPE: self._times[0][ATTR_TYPE],
-                ATTR_ROUTE: self._times[0][ATTR_ROUTE],
-                ATTR_DIRECTION: self._times[0][ATTR_DIRECTION],
-                ATTR_STOP_NAME: self._times[0][ATTR_STOP_NAME],
+        if not self._times:
+            return {
+                ATTR_DUE_IN: None,
+                ATTR_DUE_AT: None,
+                ATTR_TYPE: None,
+                ATTR_ROUTE: None,
+                ATTR_DIRECTION: None,
+                ATTR_STOP_NAME: None,
                 ATTR_STOP_ID: self._stop_id,
                 ATTR_ATTRIBUTION: ATTRIBUTION,
-                ATTR_NEXT_UP: next_up
+                ATTR_NEXT_UP: None
             }
-            return {k: v for k, v in params.items() if v}
+
+        next_up = None
+        if len(self._times) > 1:
+            next_up = self._times[1:]
+
+        return {
+            ATTR_DUE_IN: self._times[0][ATTR_DUE_IN],
+            ATTR_DUE_AT: self._times[0][ATTR_DUE_AT],
+            ATTR_TYPE: self._times[0][ATTR_TYPE],
+            ATTR_ROUTE: self._times[0][ATTR_ROUTE],
+            ATTR_DIRECTION: self._times[0][ATTR_DIRECTION],
+            ATTR_STOP_NAME: self._times[0][ATTR_STOP_NAME],
+            ATTR_STOP_ID: self._stop_id,
+            ATTR_ATTRIBUTION: ATTRIBUTION,
+            ATTR_NEXT_UP: next_up
+        }
+        # return {k: v for k, v in params.items() if v}
 
     @property
     def unit_of_measurement(self):
@@ -140,7 +153,6 @@ class RejseplanenTransportSensor(Entity):
         self.data.update()
         self._times = self.data.info
         try:
-            # Consider checking if this is in the past, and show the next instead
             self._state = self._times[0][ATTR_DUE_IN]
         except TypeError:
             pass
@@ -159,12 +171,12 @@ class PublicTransportData():
 
     def empty_result(self):
         """Object returned when no departures are found."""
-        return [{ATTR_DUE_IN: 'n/a',
-                 ATTR_DUE_AT: 'n/a',
-                 ATTR_TYPE: 'n/a',
-                 ATTR_ROUTE: self.route,
-                 ATTR_DIRECTION: 'n/a',
-                 ATTR_STOP_NAME: 'n/a'}]
+        return [{ATTR_DUE_IN: None,
+                 ATTR_DUE_AT: None,
+                 ATTR_TYPE: None,
+                 ATTR_ROUTE: None,
+                 ATTR_DIRECTION: None,
+                 ATTR_STOP_NAME: None}]
 
     def update(self):
         """Get the latest data from rejseplanen."""
@@ -172,16 +184,26 @@ class PublicTransportData():
         self.info = []
 
         def intersection(lst1, lst2):
+            """Return items contained in both lists"""
             return list(set(lst1) & set(lst2))
 
         # Limit search to selected types, to get more results
-        allTypes = not bool(self.departure_type)
-        useTrain = allTypes or bool(intersection(TRAIN_TYPES, self.departure_type))
-        useBus = allTypes or bool(intersection(BUS_TYPES, self.departure_type))
-        useMetro = allTypes or bool(intersection(METRO_TYPES, self.departure_type))
+        all_types = not bool(self.departure_type)
+        use_train = all_types or bool(
+            intersection(TRAIN_TYPES, self.departure_type))
+        use_bus = all_types or bool(
+            intersection(BUS_TYPES, self.departure_type))
+        use_metro = all_types or bool(
+            intersection(METRO_TYPES, self.departure_type))
 
         try:
-            results = rjpl.departureBoard(int(self.stop_id), timeout=5, useTrain=useTrain, useBus=useBus, useMetro=useMetro)
+            results = rjpl.departureBoard(
+                int(self.stop_id),
+                timeout=5,
+                useTrain=use_train,
+                useBus=use_bus,
+                useMetro=use_metro
+            )
         except rjpl.rjplAPIError as error:
             _LOGGER.debug("API returned error: %s", error)
             self.info = self.empty_result()
